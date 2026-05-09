@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BOM匹配工具</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 font-sans antialiased">
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center">
+      <a href="/" class="text-purple-600 hover:text-purple-700 flex items-center text-sm">
+        ← 返回首页
+      </a>
+      <h1 class="ml-auto text-xl font-bold text-gray-800">BOM 匹配工具</h1>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    <!-- Upload Section -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <!-- Master List Upload -->
+      <div class="bg-white rounded-xl p-6 shadow-sm border">
+        <h2 class="text-lg font-semibold mb-4 flex items-center">
+          <span class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3 text-purple-600">1</span>
+          上传物料大全
+        </h2>
+        <p class="text-gray-500 text-sm mb-4">上传包含SAP物料号、物料描述的Excel文件</p>
+        <input
+          id="masterInput"
+          type="file"
+          accept=".xlsx,.xls"
+          class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+        />
+        <p id="masterStatus" class="mt-3 text-sm text-green-600 hidden"></p>
+      </div>
+
+      <!-- BOM Upload -->
+      <div class="bg-white rounded-xl p-6 shadow-sm border">
+        <h2 class="text-lg font-semibold mb-4 flex items-center">
+          <span class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3 text-purple-600">2</span>
+          上传原理图BOM
+        </h2>
+        <p class="text-gray-500 text-sm mb-4">上传从原理图导出的 BOM 文件</p>
+        <input
+          id="bomInput"
+          type="file"
+          accept=".xlsx,.xls"
+          class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+        />
+        <p id="bomStatus" class="mt-3 text-sm text-green-600 hidden"></p>
+      </div>
+    </div>
+
+    <!-- Match Mode -->
+    <div class="bg-white rounded-xl p-6 shadow-sm border mb-8">
+      <h2 class="text-lg font-semibold mb-4">匹配规则</h2>
+      <div class="bg-blue-50 rounded-lg p-4 text-sm text-blue-800">
+        <p class="font-medium mb-2">匹配逻辑：</p>
+        <ol class="list-decimal list-inside space-y-1">
+          <li><strong>值匹配</strong>：原理图 Comment 中的值（如10uF）<strong>包含</strong>在物料描述中</li>
+          <li><strong>封装匹配</strong>：原理图 Footprint（如0603、C_0603）<strong>包含</strong>在物料描述中</li>
+        </ol>
+        <p class="mt-2 text-blue-600">两个条件都满足才算匹配成功（包含关系）</p>
+        <p class="mt-2 text-orange-600">未匹配的可以手动输入SAP号进行验证</p>
+      </div>
+    </div>
+
+    <!-- Action Button -->
+    <div class="text-center mb-8">
+      <button
+        id="matchBtn"
+        onclick="handleMatch()"
+        disabled
+        class="px-8 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        开始匹配
+      </button>
+    </div>
+
+    <!-- Stats -->
+    <div id="statsSection" class="bg-white rounded-xl p-6 shadow-sm border mb-8 hidden">
+      <h2 class="text-lg font-semibold mb-4">匹配结果统计</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-purple-50 rounded-lg p-4 text-center">
+          <p id="statTotal" class="text-3xl font-bold text-purple-600">0</p>
+          <p class="text-sm text-gray-500">总BOM数</p>
+        </div>
+        <div class="bg-green-50 rounded-lg p-4 text-center">
+          <p id="statMatched" class="text-3xl font-bold text-green-600">0</p>
+          <p class="text-sm text-gray-500">已匹配</p>
+        </div>
+        <div class="bg-orange-50 rounded-lg p-4 text-center">
+          <p id="statUnmatched" class="text-3xl font-bold text-orange-600">0</p>
+          <p class="text-sm text-gray-500">待验证</p>
+        </div>
+        <div class="bg-red-50 rounded-lg p-4 text-center">
+          <p id="statInvalid" class="text-3xl font-bold text-red-600">0</p>
+          <p class="text-sm text-gray-500">验证失败</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Table -->
+    <div id="resultsSection" class="bg-white rounded-xl shadow-sm border overflow-hidden hidden">
+      <div class="p-4 border-b flex justify-between items-center flex-wrap gap-4">
+        <h2 class="text-lg font-semibold">匹配结果</h2>
+        <div class="flex gap-2">
+          <button
+            onclick="handleValidateAll()"
+            class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          >
+            验证全部
+          </button>
+          <button
+            onclick="handleDownload()"
+            class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"
+          >
+            下载Excel
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">状态</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">原Comment</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">原Footprint</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">数量</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">位号</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">提取值</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">提取封装</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">手动SAP号</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">操作</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">匹配SAP号</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">旧物料号</th>
+              <th class="px-3 py-3 text-left font-medium text-gray-600">匹配描述</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div id="instructionsSection" class="bg-white rounded-xl p-6 shadow-sm border text-center text-gray-500">
+      <p class="mb-2">请上传物料大全和BOM文件后点击"开始匹配"</p>
+      <p class="text-sm">支持 .xlsx 和 .xls 格式的 Excel 文件</p>
+    </div>
+  </main>
+
+  <script>
+    let masterData = null
+    let bomData = null
+    let matchedResults = null
+
+    // Parse Excel file
+    function parseExcel(data) {
+      const workbook = XLSX.read(data, { type: 'array' })
+      const sheetName = workbook.SheetNames[0]
+      const worksheet = workbook.Sheets[sheetName]
+      return XLSX.utils.sheet_to_json(worksheet, { defval: '' })
+    }
+
+    // Parse master parts list
+    function parseMasterList(rows) {
+      return rows.map(row => {
+        const sapNo = row['SAP物料号'] || row['SAP'] || row['物料号'] || row['Material No'] || row['Material Number'] || row['Part Number'] || ''
+        const description = row['中文物料描述'] || row['物料描述'] || row['描述'] || row['Description'] || row['名称'] || row['Name'] || ''
+        const oldPartNo = row['旧物料号'] || row['旧物料编号'] || row['Old Part Number'] || row['旧号'] || row['原先号'] || ''
+        const specs = row['规格'] || row['规格书'] || row['Specs'] || row['Specification'] || ''
+        const category = row['类别'] || row['Category'] || row['分类'] || ''
+        
+        return {
+          sapNo: String(sapNo).trim().toUpperCase(),
+          description: String(description).trim(),
+          descriptionUpper: String(description).trim().toUpperCase(),
+          oldPartNo: String(oldPartNo).trim(),
+          specs: String(specs).trim(),
+          category: String(category).trim(),
+          rawData: row
+        }
+      }).filter(item => item.sapNo || item.description)
+    }
+
+    // Parse BOM file
+    function parseBom(rows) {
+      return rows.map(row => {
+        const comment = row['Comment'] || row['comment'] || row['器件'] || row['Value'] || row['值'] || ''
+        const footprint = row['Footprint'] || row['footprint'] || row['封装'] || row['Package'] || row['包'] || ''
+        const quantity = parseInt(row['数量'] || row['Quantity'] || row['Qty'] || row['Num'] || 1)
+        const reference = row['位号'] || row['Reference'] || row['Ref'] || row['Designator'] || row['编号'] || ''
+        
+        return {
+          comment: String(comment).trim(),
+          footprint: String(footprint).trim(),
+          quantity: isNaN(quantity) ? 1 : quantity,
+          reference: String(reference).trim(),
+          rawData: row
+        }
+      }).filter(item => item.comment || item.footprint)
+    }
+
+    // Extract value from BOM comment
+    function extractValueFromComment(comment) {
+      if (!comment) return ''
+      
+      // Try to find value patterns
+      const patterns = [
+        /([0-9.]+[uUmMnNpP][fFhH]?)/i,
+        /([0-9.]+[kKmMrR][Ωω]?)/i,
+        /([0-9.]+)/i
+      ]
+      
+      for (const pattern of patterns) {
+        const match = comment.match(pattern)
+        if (match) {
+          return match[1].toUpperCase()
+        }
+      }
+      
+      return ''
+    }
+
+    // Extract package from BOM comment or footprint
+    function extractPackageFromCommentOrFootprint(comment, footprint) {
+      const results = []
+      
+      if (footprint) {
+        const fp = footprint.trim()
+        results.push(fp)
+        if (/^[CRC][_-][0-9]{4}$/i.test(fp)) {
+          const numPart = fp.replace(/^[CRC][_-]/i, '')
+          results.push(numPart)
+        }
+        else if (/^[0-9]{4}$/.test(fp)) {
+          results.push('C_' + fp)
+        }
+      }
+      
+      if (comment) {
+        const matches = comment.match(/([0-9]{4})/g)
+        if (matches) {
+          matches.forEach(m => {
+            results.push(m)
+            results.push('C_' + m)
+          })
+        }
+        const cMatch = comment.match(/(C[_-][0-9]{4})/gi)
+        if (cMatch) {
+          cMatch.forEach(m => results.push(m.toUpperCase()))
+        }
+      }
+      
+      return [...new Set(results)]
+    }
+
+    // Normalize package
+    function normalizePackage(pkg) {
+      if (!pkg) return ''
+      return pkg.toUpperCase().replace(/[_\-]/g, '')
+    }
+
+    // Match value
+    function matchValue(masterDescUpper, value) {
+      if (!value) return true
+      return masterDescUpper.includes(value.toUpperCase())
+    }
+
+    // Match package
+    function matchPackage(masterDescUpper, packages) {
+      if (!packages || packages.length === 0) return true
+      
+      for (const pkg of packages) {
+        const normalizedPkg = normalizePackage(pkg)
+        const normalizedMaster = normalizePackage(masterDescUpper)
+        
+        if (normalizedMaster.includes(normalizedPkg)) return true
+      }
+      
+      return false
+    }
+
+    // Match single BOM item
+    function matchBomItem(bomItem) {
+      const value = extractValueFromComment(bomItem.comment)
+      const packages = extractPackageFromCommentOrFootprint(bomItem.comment, bomItem.footprint)
+      
+      let bestMatch = null
+      let valueMatch = false
+      let packageMatch = false
+      
+      for (const master of masterData) {
+        const vm = matchValue(master.descriptionUpper, value)
+        const pm = matchPackage(master.descriptionUpper, packages)
+        
+        if (vm && pm) {
+          bestMatch = master
+          valueMatch = vm
+          packageMatch = pm
+          break
+        }
+      }
+      
+      return {
+        sourceComment: bomItem.comment,
+        sourceFootprint: bomItem.footprint,
+        extractedValue: value,
+        extractedPackages: packages.join(', '),
+        quantity: bomItem.quantity,
+        reference: bomItem.reference,
+        rawData: bomItem.rawData,
+        matched: bestMatch,
+        valueMatch: valueMatch,
+        packageMatch: packageMatch,
+        manualSap: '',
+        manualStatus: null // null=未验证, 'valid'=有效, 'invalid'=无效
+      }
+    }
+
+    // Validate manual SAP input
+    function validateManualSap(rowIdx) {
+      const result = matchedResults[rowIdx]
+      const manualSap = result.manualSap.trim().toUpperCase()
+      
+      if (!manualSap) {
+        alert('请输入SAP号')
+        return
+      }
+      
+      // Find master part by SAP号
+      const master = masterData.find(m => m.sapNo === manualSap)
+      
+      if (!master) {
+        result.manualStatus = 'invalid'
+        result.manualMessage = 'SAP号不存在'
+        renderResults()
+        updateStats()
+        return
+      }
+      
+      // Check if value matches
+      const valueOk = matchValue(master.descriptionUpper, result.extractedValue)
+      // Check if package matches
+      const pkgOk = matchPackage(master.descriptionUpper, result.extractedPackages.split(', ').filter(p => p))
+      
+      if (valueOk && pkgOk) {
+        result.matched = master
+        result.valueMatch = valueOk
+        result.packageMatch = pkgOk
+        result.manualStatus = 'valid'
+        result.manualMessage = '验证通过'
+      } else {
+        result.manualStatus = 'invalid'
+        let issues = []
+        if (!valueOk) issues.push('值不匹配')
+        if (!pkgOk) issues.push('封装不匹配')
+        result.manualMessage = issues.join(', ')
+      }
+      
+      renderResults()
+      updateStats()
+    }
+
+    // Validate all unmatched with manual SAP
+    function handleValidateAll() {
+      matchedResults.forEach((result, idx) => {
+        if (!result.matched && result.manualSap.trim()) {
+          const manualSap = result.manualSap.trim().toUpperCase()
+          const master = masterData.find(m => m.sapNo === manualSap)
+          
+          if (master) {
+            const valueOk = matchValue(master.descriptionUpper, result.extractedValue)
+            const pkgOk = matchPackage(master.descriptionUpper, result.extractedPackages.split(', ').filter(p => p))
+            
+            if (valueOk && pkgOk) {
+              result.matched = master
+              result.valueMatch = valueOk
+              result.packageMatch = pkgOk
+              result.manualStatus = 'valid'
+              result.manualMessage = '验证通过'
+            } else {
+              result.manualStatus = 'invalid'
+              let issues = []
+              if (!valueOk) issues.push('值不匹配')
+              if (!pkgOk) issues.push('封装不匹配')
+              result.manualMessage = issues.join(', ')
+            }
+          } else {
+            result.manualStatus = 'invalid'
+            result.manualMessage = 'SAP号不存在'
+          }
+        }
+      })
+      
+      renderResults()
+      updateStats()
+    }
+
+    // Handle SAP input change
+    function handleSapInputChange(rowIdx, value) {
+      matchedResults[rowIdx].manualSap = value
+      matchedResults[rowIdx].manualStatus = null
+      matchedResults[rowIdx].manualMessage = ''
+    }
+
+    // Update stats
+    function updateStats() {
+      const total = matchedResults.length
+      const matched = matchedResults.filter(r => r.matched && !r.manualStatus).length
+      const manualValid = matchedResults.filter(r => r.manualStatus === 'valid').length
+      const unmatched = matchedResults.filter(r => !r.matched && !r.manualStatus).length
+      const invalid = matchedResults.filter(r => r.manualStatus === 'invalid').length
+      
+      document.getElementById('statTotal').textContent = total
+      document.getElementById('statMatched').textContent = matched + manualValid
+      document.getElementById('statUnmatched').textContent = unmatched + invalid
+      document.getElementById('statInvalid').textContent = invalid
+    }
+
+    // Render results
+    function renderResults() {
+      const tbody = document.getElementById('resultsBody')
+      tbody.innerHTML = matchedResults.map((row, idx) => {
+        let statusBadge
+        if (row.matched && !row.manualStatus) {
+          statusBadge = '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">已匹配</span>'
+        } else if (row.manualStatus === 'valid') {
+          statusBadge = '<span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">手动验证</span>'
+        } else if (row.manualStatus === 'invalid') {
+          statusBadge = '<span class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs">验证失败</span>'
+        } else {
+          statusBadge = '<span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs">待验证</span>'
+        }
+        
+        const valueBadge = row.valueMatch
+          ? '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">✓</span>'
+          : '<span class="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">-</span>'
+        
+        const pkgBadge = row.packageMatch
+          ? '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">✓</span>'
+          : '<span class="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">-</span>'
+        
+        const isUnmatched = !row.matched
+        const trClass = row.manualStatus === 'invalid' ? 'bg-red-50' : (isUnmatched ? 'bg-orange-50' : '')
+        
+        const displaySap = row.matched?.sapNo || row.manualSap || '-'
+        
+        return `
+          <tr class="${trClass}">
+            <td class="px-3 py-3">${statusBadge}</td>
+            <td class="px-3 py-3 font-mono text-xs">${row.sourceComment || '-'}</td>
+            <td class="px-3 py-3 text-xs">${row.sourceFootprint || '-'}</td>
+            <td class="px-3 py-3">${row.quantity}</td>
+            <td class="px-3 py-3 text-gray-600 text-xs">${row.reference || '-'}</td>
+            <td class="px-3 py-3 font-mono text-xs">${row.extractedValue || '-'}</td>
+            <td class="px-3 py-3 text-xs">${row.extractedPackages || '-'}</td>
+            <td class="px-3 py-3">
+              <input 
+                type="text" 
+                value="${row.manualSap}"
+                onchange="handleSapInputChange(${idx}, this.value)"
+                placeholder="输入SAP号"
+                class="w-32 px-2 py-1 text-xs border rounded ${row.manualStatus === 'invalid' ? 'border-red-500' : 'border-gray-300'}"
+              />
+            </td>
+            <td class="px-3 py-3">
+              <button 
+                onclick="validateManualSap(${idx})"
+                class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+              >
+                验证
+              </button>
+            </td>
+            <td class="px-3 py-3 font-mono text-xs font-medium text-purple-600">${displaySap}</td>
+            <td class="px-3 py-3 font-mono text-xs text-orange-600">${row.matched?.oldPartNo || '-'}</td>
+            <td class="px-3 py-3 text-sm">${row.matched?.description || (row.manualStatus === 'invalid' ? row.manualMessage : '-')}</td>
+          </tr>
+        `
+      }).join('')
+    }
+
+    // Handle master file upload
+    document.getElementById('masterInput').addEventListener('change', function(e) {
+      const file = e.target.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = function(evt) {
+        const data = new Uint8Array(evt.target.result)
+        const rows = parseExcel(data)
+        masterData = parseMasterList(rows)
+        const status = document.getElementById('masterStatus')
+        status.textContent = `✓ 已加载 ${masterData.length} 条物料`
+        status.classList.remove('hidden')
+        checkReady()
+      }
+      reader.readAsArrayBuffer(file)
+    })
+
+    // Handle BOM file upload
+    document.getElementById('bomInput').addEventListener('change', function(e) {
+      const file = e.target.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = function(evt) {
+        const data = new Uint8Array(evt.target.result)
+        const rows = parseExcel(data)
+        bomData = parseBom(rows)
+        const status = document.getElementById('bomStatus')
+        status.textContent = `✓ 已加载 ${bomData.length} 条BOM`
+        status.classList.remove('hidden')
+        checkReady()
+      }
+      reader.readAsArrayBuffer(file)
+    })
+
+    function checkReady() {
+      document.getElementById('matchBtn').disabled = !(masterData && bomData)
+    }
+
+    function handleMatch() {
+      if (!masterData || !bomData) {
+        alert('请先上传物料大全和BOM文件')
+        return
+      }
+      const btn = document.getElementById('matchBtn')
+      btn.textContent = '处理中...'
+      btn.disabled = true
+
+      setTimeout(() => {
+        matchedResults = bomData.map(item => matchBomItem(item))
+        
+        document.getElementById('statsSection').classList.remove('hidden')
+        document.getElementById('resultsSection').classList.remove('hidden')
+        document.getElementById('instructionsSection').classList.add('hidden')
+
+        renderResults()
+        updateStats()
+
+        btn.textContent = '开始匹配'
+        btn.disabled = false
+      }, 100)
+    }
+
+    function handleDownload() {
+      if (!matchedResults) return
+      
+      const wsData = matchedResults
+        .filter(row => row.matched) // Only download matched rows
+        .map(row => {
+          return {
+            'Comment': row.sourceComment || '',
+            'Designator': row.reference || '',
+            'Quantity': row.quantity,
+            '匹配SAP号': row.matched?.sapNo || '',
+            '旧物料号': row.matched?.oldPartNo || '',
+            '匹配物料描述': row.matched?.description || ''
+          }
+        })
+      
+      if (wsData.length === 0) {
+        alert('没有可下载的匹配数据')
+        return
+      }
+      
+      const ws = XLSX.utils.json_to_sheet(wsData)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'BOM匹配结果')
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+      const blob = new Blob([wbout], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'BOM匹配结果.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+  </script>
+</body>
+</html>
